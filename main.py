@@ -4,19 +4,6 @@ import re
 from psycopg2 import OperationalError
 
 
-try:
-    connection = psycopg2.connect(user="postgres",
-                                  password="29072001",
-                                  host="localhost",
-                                  port="5432")
-    connection.autocommit = True
-    cursor = connection.cursor()
-    cursor.execute('create database mos_project;')
-
-except OperationalError as e:
-    print("Ошибка при работе с PostgreSQL", e)
-
-
 def create_connection(db_name, db_user, db_password, db_host, db_port):
     connection = None
     try:
@@ -30,6 +17,21 @@ def create_connection(db_name, db_user, db_password, db_host, db_port):
     except OperationalError as e:
         print(f"The error '{e}' occurred")
     return connection
+
+
+try:
+    connection = psycopg2.connect(user="postgres",
+                                  password="29072001",
+                                  host="localhost",
+                                  port="5432")
+    connection.autocommit = True
+    cursor = connection.cursor()
+    cursor.execute('create database mos_project;')
+    cursor.close()
+    connection.close()
+
+except OperationalError as e:
+    print(f"The error '{e}' occurred")
 
 
 connection = create_connection("mos_project", "postgres", "29072001", "localhost", "5432")
@@ -92,11 +94,11 @@ stops_records = ", ".join(["%s"] * len(stops_array))
 complexes_records = ", ".join(["%s"] * len(complexes_array))
 
 insert_query_stops = (
-    f"INSERT INTO bus_stations VALUES {stops_records}"
+    f"INSERT INTO bus_stations VALUES {stops_records};"
 )
 
 insert_query_complexes = (
-    f"INSERT INTO test_complexes VALUES {complexes_records}"
+    f"INSERT INTO test_complexes VALUES {complexes_records};"
 )
 
 
@@ -120,5 +122,6 @@ for name, point in temp:
         df.index = df.index + 1
 
 df.to_csv("output.csv", index=False)
+
 cursor.close()
 connection.close()
