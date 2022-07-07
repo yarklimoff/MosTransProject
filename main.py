@@ -4,6 +4,19 @@ import re
 from psycopg2 import OperationalError
 
 
+try:
+    connection = psycopg2.connect(user="postgres",
+                                  password="29072001",
+                                  host="localhost",
+                                  port="5432")
+    connection.autocommit = True
+    cursor = connection.cursor()
+    cursor.execute('create database mos_project;')
+
+except OperationalError as e:
+    print("Ошибка при работе с PostgreSQL", e)
+
+
 def create_connection(db_name, db_user, db_password, db_host, db_port):
     connection = None
     try:
@@ -19,15 +32,10 @@ def create_connection(db_name, db_user, db_password, db_host, db_port):
     return connection
 
 
-def execute_query(connection, query):
-    connection.autocommit = True
-    cursor = connection.cursor()
-    try:
-        cursor.execute(query)
-    except OperationalError as e:
-        print(f"The error '{e}' occurred")
-
-connection = create_connection("buildings", "postgres", "29072001", "localhost", "5432")
+connection = create_connection("mos_project", "postgres", "29072001", "localhost", "5432")
+connection.autocommit = True
+cursor = connection.cursor()
+cursor.execute('create extension postgis;')
 
 create_bus_stations_table = """
 CREATE TABLE IF NOT EXISTS bus_stations (
@@ -57,8 +65,8 @@ CREATE TABLE IF NOT EXISTS test_complexes (
 );
 """
 
-execute_query(connection, create_bus_stations_table)
-execute_query(connection, create_test_complexes_table)
+cursor.execute(create_bus_stations_table)
+cursor.execute(create_test_complexes_table)
 
 stops = pd.read_csv("bus_stations.csv")
 complexes = pd.read_csv("test_complexes.csv")
@@ -66,16 +74,16 @@ complexes = pd.read_csv("test_complexes.csv")
 stops_array = []
 complexes_array = []
 
-for index, row in stops.iterrows():
+for _, row in stops.iterrows():
     temp = row.values
-    m = re.search('\[(\S*\s*\S*)\]', row.values[-2])
-    m = m.group(0)[1:-1].split(",")
+    m = re.search('\[(\S*\s*\S*)\]', row.values[-2]) # Привожу координаты к удобному виду (... , ...)
+    m = m.group(0)[1: -1].split(",")
     temp[-2] = f"({m[0]}, {m[1]})"
     stops_array.append(tuple(temp))
 
-for index, row in complexes.iterrows():
+for _, row in complexes.iterrows(): 
     temp = row.values
-    m = re.search('\(\S*\s*\S*\)', row.values[-1])
+    m = re.search('\(\S*\s*\S*\)', row.values[-1]) # Привожу координаты к удобному виду (... , ...)
     m = m.group(0)[1: -1].split()
     temp[-1] = f"({m[0]}, {m[1]})"
     complexes_array.append(tuple(temp))
@@ -92,17 +100,25 @@ insert_query_complexes = (
 )
 
 
-connection.autocommit = True
-cursor = connection.cursor()
-#cursor.execute(insert_query_stops, stops_array)
-#cursor.execute(insert_query_complexes, complexes_array)
+cursor.execute(insert_query_stops, stops_array)
+cursor.execute(insert_query_complexes, complexes_array)
 
-#cursor.execute(f"ALTER TABLE bus_stations ALTER COLUMN geodata_center TYPE geometry(Point,4326) USING ST_SetSRID(geodata_center::GEOMETRY(POINT), 4326);")
-poi = (37.49988, 55.767798)
-cursor.execute("""\
-    SELECT id, ST_AsGeoJSON(geodata_center), ST_Distance(geodata_center, poi)
-FROM bus_stations, (SELECT ST_MakePoint(%s, %s)::geography AS poi) AS f
-WHERE ST_DWithin(geodata_center, poi, 1000);""", poi)
+cursor.execute(f"ALTER TABLE bus_stations ALTER COLUMN \
+    geodata_center TYPE geometry(Point,4326) USING ST_SetSRID(geodata_center::GEOMETRY(POINT), 4326);")
 
-for row in cursor.fetchall():
-    print(row)
+cursor.execute("SELECT * from test_complexes;")
+temp = cursor.fetchall()
+df = pd.DataFrame(columns=['name_bulding', 'name_stop', 'distance'])
+
+for name, point in temp:
+    cursor.execute("""\
+    SELECT name, ST_Distance(geodata_center, poi) as dist
+    FROM bus_stations, (SELECT ST_MakePoint(%s, %s)::geography AS poi) AS f
+    WHERE ST_DWithin(geodata_center, poi, 1000) ORDER BY dist;""", tuple(map(float, point[1: -1].split(','))))
+    for i in cursor.fetchall():
+        df.loc[-1] = [name] + list(i)
+        df.index = df.index + 1
+
+df.to_csv("output.csv", index=False)
+cursor.close()
+connection.close()
